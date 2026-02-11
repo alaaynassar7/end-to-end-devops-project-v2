@@ -1,0 +1,124 @@
+name: $(Date:yyyyMMdd)$(Rev:.r)-Addons
+trigger: none
+pr: none
+
+parameters:
+  - name: env
+    displayName: Environment
+    type: string
+    default: nonprod
+    values: [nonprod, prod]
+
+variables:
+  - group: 'My Vars' 
+  - name: TF_DIR
+    value: 'terraform' 
+  - name: TF_VAR_FILE
+    value: '${{ parameters.env }}.tfvars'
+  - name: AWS_SERVICE_CONNECTION
+    value: 'aws-alaa-2'
+  - name: AWS_REGION
+    value: 'eu-north-1'
+  - name: CLUSTER_NAME
+    value: 'alaa-devops-project-cluster'
+
+pool:
+  name: 'Self hosted pools'
+  demands:
+   - Agent.Name -equals alaaynassar-VMware
+
+jobs:
+- job: Addons
+  displayName: 'Deploy DevOps Stack & DataDog'
+  timeoutInMinutes: 160
+  steps:
+  - checkout: self
+
+  - task: TerraformInstaller@1
+    inputs: { terraformVersion: latest }
+
+  # 1. Init & Kubeconfig 
+  - task: AWSShellScript@1
+    displayName: 'Terraform Init & Kubeconfig'
+    inputs:
+      awsCredentials: $(AWS_SERVICE_CONNECTION)
+      regionName: $(AWS_REGION)
+      scriptType: inline
+      inlineScript: |
+        cd "$(TF_DIR)"
+        terraform init
+        aws eks update-kubeconfig --name "$(CLUSTER_NAME)" --region "$(AWS_REGION)"
+
+  - task: HelmInstaller@1
+    inputs: { helmVersionToInstall: 'latest' }
+
+  # 2. Install Nginx & Link API Gateway 
+  - task: AWSShellScript@1
+    displayName: 'Install Nginx & Link APIGW'
+    inputs:
+      awsCredentials: $(AWS_SERVICE_CONNECTION)
+      regionName: $(AWS_REGION)
+      scriptType: inline
+      inlineScript: |
+        echo "Installing Nginx Ingress..."
+        helm upgrade --install ingress-nginx ingress-nginx \
+          --repo https://kubernetes.github.io/ingress-nginx \
+          --namespace ingress-nginx --create-namespace \
+          --set controller.service.type=LoadBalancer \
+          --set controller.service.annotations."service\.beta\.kubernetes\.io/aws-load-balancer-type"="nlb" \
+          --wait --timeout 15m
+
+        cd "$(TF_DIR)"
+        NLB_DNS=$(kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+        NLB_NAME=$(echo $NLB_DNS | cut -d'-' -f1)
+        LB_ARN=$(aws elbv2 describe-load-balancers --names "$NLB_NAME" --query 'LoadBalancers[0].LoadBalancerArn' --output text)
+        LISTENER_ARN=$(aws elbv2 describe-listeners --load-balancer-arn "$LB_ARN" --query 'Listeners[0].ListenerArn' --output text)
+        
+        echo "Linking API Gateway to NLB DNS: $NLB_DNS"
+        terraform apply -auto-approve -var-file="$(TF_VAR_FILE)" \
+          -var="nlb_dns_name=http://$NLB_DNS" \
+          -var="nlb_listener_arn=$LISTENER_ARN"
+
+  # 3. Install DevOps Tools (Argo, Sonar, Vault)
+  - task: AWSShellScript@1
+    displayName: 'Deploy Tools (Argo, Sonar, Vault)'
+    inputs:
+      awsCredentials: $(AWS_SERVICE_CONNECTION)
+      regionName: $(AWS_REGION)
+      scriptType: inline
+      inlineScript: |
+        # ArgoCD
+        helm upgrade --install argocd argo-cd \
+          --repo https://argoproj.github.io/argo-helm \
+          --namespace alaa --create-namespace \
+          --set server.extraArgs={--insecure,--rootpath=/argocd}
+
+        # SonarQube
+        helm upgrade --install sonarqube sonarqube \
+          --repo https://SonarSource.github.io/helm-chart-sonarqube \
+          --namespace alaa --create-namespace \
+          --set sonarWebContext=/sonarqube
+
+        # Vault
+        helm upgrade --install vault vault \
+          --repo https://helm.releases.hashicorp.com \
+          --namespace alaa --create-namespace
+
+  # 4. Install DataDog 
+  - task: AWSShellScript@1
+    displayName: 'Install DataDog Monitoring'
+    inputs:
+      awsCredentials: $(AWS_SERVICE_CONNECTION)
+      regionName: $(AWS_REGION)
+      scriptType: inline
+      inlineScript: |
+        echo "Installing DataDog..."
+        helm repo add datadog https://helm.datadoghq.com
+        helm repo update
+        helm upgrade --install datadog-agent datadog/datadog \
+          --namespace alaa --create-namespace \
+          --set datadog.apiKey=$(DATADOG_API_KEY) \
+          --set datadog.clusterName=$(CLUSTER_NAME) \
+          --set datadog.site='datadoghq.com' \
+          --set datadog.logs.enabled=true \
+          --set datadog.logs.containerCollectAll=true

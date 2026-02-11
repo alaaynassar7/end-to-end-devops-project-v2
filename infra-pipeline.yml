@@ -1,0 +1,87 @@
+name: $(Date:yyyyMMdd)$(Rev:.r)-Infrastructure
+trigger: none
+pr: none
+
+pool:
+  name: 'Self hosted pools'
+  demands:
+   - Agent.Name -equals alaaynassar-VMware
+
+parameters:
+  - name: env
+    displayName: Environment
+    type: string
+    default: nonprod
+    values: [nonprod, prod]
+
+  - name: action
+    displayName: Action to Perform
+    type: string
+    default: plan
+    values:
+      - plan
+      - apply
+      - destroy
+
+variables:
+  TF_DIR: 'terraform' 
+  TF_VAR_FILE: '${{ parameters.env }}.tfvars'
+  AWS_SERVICE_CONNECTION: 'aws-alaa-2' 
+  AWS_REGION: 'eu-north-1'
+
+jobs:
+- job: Infrastructure
+  displayName: 'Infrastructure Management'
+  timeoutInMinutes: 120
+  steps:
+  - checkout: self
+
+  - task: TerraformInstaller@1
+    displayName: Install Terraform
+    inputs:
+      terraformVersion: latest
+
+  - task: AWSShellScript@1
+    displayName: Terraform Init
+    inputs:
+      awsCredentials: $(AWS_SERVICE_CONNECTION)
+      regionName: $(AWS_REGION)
+      scriptType: inline
+      inlineScript: |
+        set -euo pipefail
+        cd "$(TF_DIR)"
+        terraform init
+
+  - task: AWSShellScript@1
+    displayName: Terraform Execute Action
+    inputs:
+      awsCredentials: $(AWS_SERVICE_CONNECTION)
+      regionName: $(AWS_REGION)
+      scriptType: inline
+      inlineScript: |
+        set -euo pipefail
+        cd "$(TF_DIR)"
+        
+        ACTION="${{ parameters.action }}"
+        
+        if [ "$ACTION" == "plan" ]; then
+          echo "Running Terraform Plan..."
+          terraform plan -var-file="$(TF_VAR_FILE)"
+          
+        elif [ "$ACTION" == "apply" ]; then
+          echo "Running Terraform Apply..."
+          terraform apply -auto-approve -var-file="$(TF_VAR_FILE)"
+          
+        elif [ "$ACTION" == "destroy" ]; then
+          echo "Cleaning up Cloud Resources before Destroy..."
+          VPC_ID="$(terraform output -raw vpc_id || echo "")"
+          if [ -n "$VPC_ID" ]; then
+            ELB_ARNS=$(aws elbv2 describe-load-balancers --query "LoadBalancers[?VpcId=='$VPC_ID'].LoadBalancerArn" --output text)
+            for arn in $ELB_ARNS; do
+              aws elbv2 delete-load-balancer --load-balancer-arn "$arn"
+            done
+            sleep 30
+          fi
+          echo "Running Terraform Destroy..."
+          terraform destroy -auto-approve -var-file="$(TF_VAR_FILE)" -lock=false
+        fi

@@ -1,0 +1,41 @@
+name: $(Date:yyyyMMdd)$(Rev:.r)-Release
+
+trigger: none
+pr: none
+
+variables:
+  AWS_SERVICE_CONNECTION: 'aws-alaa-2' 
+  AWS_REGION: 'eu-north-1'
+  IMAGE_REPOSITORY: 'alaaynassar7/motivational-app'
+
+pool:
+  name: 'Self hosted pools'
+  demands:
+   - Agent.Name -equals alaaynassar-VMware
+
+jobs:
+- job: Release
+  displayName: 'Build and Release Docker Image'
+  steps:
+  - checkout: self
+
+  - task: Docker@2
+    displayName: Build and Push Docker Image
+    inputs:
+      containerRegistry: 'alaa-docker'
+      repository: $(IMAGE_REPOSITORY)
+      command: 'buildAndPush'
+      Dockerfile: 'motivational-app/dockerfile' 
+      buildContext: 'motivational-app' 
+      tags: |
+        $(Build.BuildId)
+        latest
+
+  - task: AWSShellScript@1
+    displayName: Verify AWS Connection
+    inputs:
+      awsCredentials: $(AWS_SERVICE_CONNECTION)
+      regionName: $(AWS_REGION)
+      scriptType: inline
+      inlineScript: |
+        aws sts get-caller-identity
