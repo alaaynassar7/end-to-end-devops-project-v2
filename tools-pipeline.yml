@@ -1,4 +1,4 @@
-name: $(Date:yyyyMMdd)$(Rev:.r)-Addons
+name: $(Date:yyyyMMdd)$(Rev:.r)-Tools-Infrastructure
 trigger: none
 pr: none
 
@@ -6,8 +6,8 @@ parameters:
   - name: env
     displayName: Environment
     type: string
-    default: nonprod
     values: [nonprod, prod]
+    default: nonprod
 
 variables:
   - group: 'My Vars' 
@@ -21,15 +21,17 @@ variables:
     value: 'eu-north-1'
   - name: CLUSTER_NAME
     value: 'alaa-devops-project-cluster'
+  - name: NAMESPACE
+    value: 'alaa'
 
 pool:
   name: 'Self hosted pools'
   demands:
-   - Agent.Name -equals alaaynassar-VMware
+    - Agent.Name -equals alaaynassar-VMware
 
 jobs:
 - job: Addons
-  displayName: 'Deploy DevOps Stack & DataDog'
+  displayName: 'Addons Deployment (Nginx, API Link, Tools, DataDog)'
   timeoutInMinutes: 160
   steps:
   - checkout: self
@@ -37,7 +39,7 @@ jobs:
   - task: TerraformInstaller@1
     inputs: { terraformVersion: latest }
 
-  # 1. Init & Kubeconfig 
+  # 1. Terraform Init & Kubeconfig
   - task: AWSShellScript@1
     displayName: 'Terraform Init & Kubeconfig'
     inputs:
@@ -45,6 +47,7 @@ jobs:
       regionName: $(AWS_REGION)
       scriptType: inline
       inlineScript: |
+        set -euo pipefail
         cd "$(TF_DIR)"
         terraform init
         aws eks update-kubeconfig --name "$(CLUSTER_NAME)" --region "$(AWS_REGION)"
@@ -52,73 +55,88 @@ jobs:
   - task: HelmInstaller@1
     inputs: { helmVersionToInstall: 'latest' }
 
-  # 2. Install Nginx & Link API Gateway 
+  # 2. Install Nginx Ingress
   - task: AWSShellScript@1
-    displayName: 'Install Nginx & Link APIGW'
+    displayName: 'Install Nginx Ingress'
     inputs:
       awsCredentials: $(AWS_SERVICE_CONNECTION)
       regionName: $(AWS_REGION)
       scriptType: inline
       inlineScript: |
-        echo "Installing Nginx Ingress..."
+        set -euo pipefail
         helm upgrade --install ingress-nginx ingress-nginx \
           --repo https://kubernetes.github.io/ingress-nginx \
           --namespace ingress-nginx --create-namespace \
+          --version 4.11.3 \
           --set controller.service.type=LoadBalancer \
           --set controller.service.annotations."service\.beta\.kubernetes\.io/aws-load-balancer-type"="nlb" \
           --wait --timeout 15m
 
-        cd "$(TF_DIR)"
+  # 3. Link API Gateway to Load Balancer
+  - task: AWSShellScript@1
+    displayName: 'Link API Gateway to Load Balancer'
+    inputs:
+      awsCredentials: $(AWS_SERVICE_CONNECTION)
+      regionName: $(AWS_REGION)
+      scriptType: inline
+      inlineScript: |
+        set -euo pipefail
+        echo "Fetching NLB DNS..."
         NLB_DNS=$(kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+        
+        if [ -z "$NLB_DNS" ]; then echo "Waiting for NLB DNS..."; sleep 30; NLB_DNS=$(kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'); fi
+
         NLB_NAME=$(echo $NLB_DNS | cut -d'-' -f1)
         LB_ARN=$(aws elbv2 describe-load-balancers --names "$NLB_NAME" --query 'LoadBalancers[0].LoadBalancerArn' --output text)
         LISTENER_ARN=$(aws elbv2 describe-listeners --load-balancer-arn "$LB_ARN" --query 'Listeners[0].ListenerArn' --output text)
         
-        echo "Linking API Gateway to NLB DNS: $NLB_DNS"
+        cd "$(TF_DIR)"
         terraform apply -auto-approve -var-file="$(TF_VAR_FILE)" \
           -var="nlb_dns_name=http://$NLB_DNS" \
           -var="nlb_listener_arn=$LISTENER_ARN"
 
-  # 3. Install DevOps Tools (Argo, Sonar, Vault)
+  # 4. Deploy DevOps Tools (Argo, Vault, Sonar)
   - task: AWSShellScript@1
-    displayName: 'Deploy Tools (Argo, Sonar, Vault)'
+    displayName: 'Deploy DevOps Tools'
     inputs:
       awsCredentials: $(AWS_SERVICE_CONNECTION)
       regionName: $(AWS_REGION)
       scriptType: inline
       inlineScript: |
+        set -euo pipefail
         # ArgoCD
         helm upgrade --install argocd argo-cd \
           --repo https://argoproj.github.io/argo-helm \
-          --namespace alaa --create-namespace \
-          --set server.extraArgs={--insecure,--rootpath=/argocd}
-
-        # SonarQube
-        helm upgrade --install sonarqube sonarqube \
-          --repo https://SonarSource.github.io/helm-chart-sonarqube \
-          --namespace alaa --create-namespace \
-          --set sonarWebContext=/sonarqube
+          --namespace $(NAMESPACE) --create-namespace \
+          --set server.extraArgs={--insecure,--rootpath=/argocd} --wait
 
         # Vault
         helm upgrade --install vault vault \
           --repo https://helm.releases.hashicorp.com \
-          --namespace alaa --create-namespace
+          --namespace $(NAMESPACE) --create-namespace --wait
 
-  # 4. Install DataDog 
+        # SonarQube
+        helm upgrade --install sonarqube sonarqube \
+          --repo https://SonarSource.github.io/helm-chart-sonarqube \
+          --namespace $(NAMESPACE) --create-namespace \
+          --set sonarWebContext=/sonarqube --wait
+
   - task: AWSShellScript@1
-    displayName: 'Install DataDog Monitoring'
+    displayName: 'Install DataDog'
+    continueOnError: true 
     inputs:
       awsCredentials: $(AWS_SERVICE_CONNECTION)
       regionName: $(AWS_REGION)
       scriptType: inline
       inlineScript: |
-        echo "Installing DataDog..."
+        set -euo pipefail
         helm repo add datadog https://helm.datadoghq.com
         helm repo update
         helm upgrade --install datadog-agent datadog/datadog \
-          --namespace alaa --create-namespace \
+          --namespace $(NAMESPACE) --create-namespace \
           --set datadog.apiKey=$(DATADOG_API_KEY) \
-          --set datadog.clusterName=$(CLUSTER_NAME) \
-          --set datadog.site='datadoghq.com' \
+          --set datadog.site='us5.datadoghq.com' \
+          --set datadog.clusterName='$(CLUSTER_NAME)' \
+          --set registry='gcr.io/datadoghq' \
           --set datadog.logs.enabled=true \
           --set datadog.logs.containerCollectAll=true
