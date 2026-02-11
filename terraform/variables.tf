@@ -1,6 +1,6 @@
 variable "aws_region" {
   description = "The AWS Region to deploy the cluster into"
-  default     = "eu-north-1"
+  default     = "us-east-2"
 }
 
 variable "project_name" {
