@@ -2,7 +2,7 @@ name: $(Date:yyyyMMdd)$(Rev:.r)-Infrastructure
 trigger: none
 pr: none
 
-# Pool Configuration as requested
+# Pool Configuration
 pool:
   name: 'Self hosted pools'
   demands:
@@ -15,13 +15,13 @@ parameters:
     default: nonprod
     values: [nonprod, prod]
 
-  - name: destroy
-    displayName: Destroy
-    type: boolean
-    default: false
+  - name: action
+    displayName: Action
+    type: string
+    default: apply
+    values: [plan, apply, destroy]
 
 variables:
-  # Updated based on your screenshots
   TF_DIR: 'terraform'
   TF_VAR_FILE: '${{ parameters.env }}.tfvars'
   AWS_SERVICE_CONNECTION: 'aws-alaa-2'
@@ -29,7 +29,7 @@ variables:
 
 jobs:
 - job: Infrastructure
-  displayName: 'Infrastructure Provisioning (VPC, EKS, Cognito, APIGW)'
+  displayName: 'Infrastructure Provisioning'
   timeoutInMinutes: 120
   steps:
   - checkout: self
@@ -51,7 +51,7 @@ jobs:
         terraform init
 
   - task: AWSShellScript@1
-    displayName: Terraform Apply or Destroy
+    displayName: Terraform Execution
     inputs:
       awsCredentials: $(AWS_SERVICE_CONNECTION)
       regionName: $(AWS_REGION)
@@ -60,15 +60,13 @@ jobs:
         set -euo pipefail
         cd "$(TF_DIR)"
         
-        # ATTEMPT FORCE UNLOCK (Safeguard)
-        echo "Attempting to force unlock state... (Skipped: Hardcoded ID removed)"
-        # terraform force-unlock -force <LOCK_ID>
+        ACTION="${{ parameters.action }}"
+        echo "Selected Action: $ACTION"
 
-        if [ "${{ parameters.destroy }}" = "True" ]; then
+        if [ "$ACTION" = "destroy" ]; then
           echo "Running Pre-Destroy Cleanup (AWS CLI Method)..."
           
-          # 1. Get VPC ID from Terraform (Critical for filtering)
-          # We fetch ID to only delete LBs inside THIS specific VPC to be safe
+          # 1. Get VPC ID from Terraform
           if ! VPC_ID=$(terraform output -raw vpc_id 2>/dev/null); then
              echo "Could not fetch VPC ID from state. Skipping LB cleanup."
           else
@@ -95,7 +93,6 @@ jobs:
                  aws elbv2 delete-load-balancer --region $(AWS_REGION) --load-balancer-arn "$arn"
                done
                
-               # Wait for them to disappear to free up ENIs
                echo "Waiting for ELBv2 deletion..."
                sleep 15
              else
@@ -109,7 +106,16 @@ jobs:
           echo "Running Terraform Destroy..."
           terraform destroy -auto-approve -var-file="$(TF_VAR_FILE)" -lock=false
           exit 0
+        
+        elif [ "$ACTION" = "plan" ]; then
+          echo "Running Terraform Plan..."
+          terraform plan -var-file="$(TF_VAR_FILE)"
+        
+        elif [ "$ACTION" = "apply" ]; then
+          echo "Running Terraform Apply..."
+          terraform apply -auto-approve -var-file="$(TF_VAR_FILE)"
+        
+        else
+          echo "Invalid action specified."
+          exit 1
         fi
-
-        echo "Running Terraform Apply..."
-        terraform apply -auto-approve -var-file="$(TF_VAR_FILE)"

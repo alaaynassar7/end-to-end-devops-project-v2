@@ -1,6 +1,5 @@
 resource "aws_cognito_user_pool" "main" {
   name = "${var.project_name}-user-pool-${var.environment}"
-
   password_policy {
     minimum_length    = 8
     require_lowercase = true
@@ -8,43 +7,28 @@ resource "aws_cognito_user_pool" "main" {
     require_symbols   = true
     require_uppercase = true
   }
-
-  username_attributes      = ["email"]
+  username_attributes = ["email"]
   auto_verified_attributes = ["email"]
-
-  tags = {
+  admin_create_user_config { allow_admin_create_user_only = true }
+tags = {
     Project     = var.project_name
     Environment = var.environment
   }
-
-  admin_create_user_config {
-    allow_admin_create_user_only = true
   }
-}
 
 resource "aws_cognito_user_pool_client" "client" {
   name = "${var.project_name}-client"
-
   user_pool_id = aws_cognito_user_pool.main.id
-
   generate_secret = true
 
   callback_urls = ["${var.callback_url}/oauth2/callback"]
   logout_urls   = ["${var.callback_url}/"]
-   
+
   supported_identity_providers = ["COGNITO"]
-
   allowed_oauth_flows_user_pool_client = true
-  allowed_oauth_flows                  = ["code", "implicit"]
-  allowed_oauth_scopes                 = ["email", "openid", "profile"]
-
-  explicit_auth_flows = [
-    "ALLOW_USER_PASSWORD_AUTH",
-    "ALLOW_REFRESH_TOKEN_AUTH",
-    "ALLOW_USER_SRP_AUTH",
-    "ALLOW_ADMIN_USER_PASSWORD_AUTH"
-  ]
-   
+  allowed_oauth_flows = ["code", "implicit"]
+  allowed_oauth_scopes = ["email", "openid", "profile"]
+  explicit_auth_flows = ["ALLOW_USER_PASSWORD_AUTH", "ALLOW_REFRESH_TOKEN_AUTH", "ALLOW_USER_SRP_AUTH", "ALLOW_ADMIN_USER_PASSWORD_AUTH"]
 }
 
 resource "aws_cognito_user_pool_domain" "main" {

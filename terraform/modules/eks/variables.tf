@@ -5,7 +5,9 @@ variable "public_subnets" { type = list(string) }
 variable "private_subnets" { type = list(string) }
 variable "instance_type" {}
 variable "environment" {}
-variable "principal_arn" {
-  description = "ARN of the user/role to get admin access to EKS"
-  type        = string
+variable "principal_arn" {}
+variable "tags" { 
+  type    = map(string)
+  default = {} 
 }
+variable "irsa_roles" { default = {} }

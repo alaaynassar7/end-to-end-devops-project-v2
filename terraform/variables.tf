@@ -3,7 +3,18 @@ variable "aws_region" {
   default     = "us-east-2"
 }
 
-variable "project_name" { type = string }
+variable "environment" {
+  description = "Deployment environment (prod or dev)"
+  type        = string
+  default     = "nonprod"
+}
+
+variable "project_name" {
+  description = "Name prefix for resources"
+  type        = string
+  default     = "ealaa-devops-final" 
+}
+
 variable "environment" { type = string }
 variable "vpc_cidr" { type = string }
 variable "public_cidrs" { type = list(string) }
