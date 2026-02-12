@@ -6,7 +6,7 @@ variables:
   AWS_SERVICE_CONNECTION: 'aws-alaa-2'
   AWS_REGION: 'us-east-2'
   CLUSTER_NAME: 'eks-platform-nonprod-v2-cluster'
-cd  IMAGE_REPOSITORY: 'alaaynassar7/motivational-app'
+  IMAGE_REPOSITORY: 'alaaynassar7/motivational-app'
   GIT_REPO_URL: 'https://github.com/alaaynassar7/end-to-end-devops-project-v2.git'
   HELM_CHART_PATH: 'motivational-app-chart' 
   NAMESPACE: 'alaa'
