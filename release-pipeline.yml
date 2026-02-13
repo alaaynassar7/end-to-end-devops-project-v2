@@ -7,7 +7,6 @@ variables:
   AWS_REGION: 'us-east-1'
   IMAGE_REPOSITORY: 'alaaynassar7/motivational-app'
 
-# Pool Configuration (Self-Hosted Agent)
 pool:
   name: 'Self hosted pools'
   demands:
@@ -19,14 +18,17 @@ jobs:
   steps:
   - checkout: self
 
-  # 1. Build and Push (Does not need Cluster Access)
+  # Build and Push using the correct sub-directory path from your GitHub images
   - task: Docker@2
     displayName: Build and Push Docker Image
     inputs:
       containerRegistry: 'alaa-docker'
       repository: $(IMAGE_REPOSITORY)
       command: 'buildAndPush'
-      Dockerfile: '**/Dockerfile'
+      # Path updated based on your 'motivational-app' folder structure
+      Dockerfile: 'motivational-app/dockerfile' 
+      # buildContext is essential so Docker sees app.py and requirements.txt
+      buildContext: 'motivational-app'
       tags: |
         $(Build.BuildId)
         latest
