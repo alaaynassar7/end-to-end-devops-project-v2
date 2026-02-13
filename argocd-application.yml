@@ -57,7 +57,6 @@ jobs:
       inlineScript: |
         set -euo pipefail
         
-        # Extract credentials using jq for safer parsing
         DOCKER_AUTH=$(cat ~/.docker/config.json | jq -r '.auths["https://index.docker.io/v1/"].auth' | base64 -d)
         DOCKER_USER=$(echo $DOCKER_AUTH | cut -d: -f1)
         DOCKER_PASS=$(echo $DOCKER_AUTH | cut -d: -f2-)
@@ -72,7 +71,7 @@ jobs:
           --docker-password="$DOCKER_PASS" \
           --docker-email=alaayoussefnassar@gmail.com
 
-  # 4. Generate and Apply ArgoCD Application Manifest (Fixed Escape Characters)
+  # 4. Generate and Apply ArgoCD Application Manifest
   - task: AWSShellScript@1
     displayName: Apply ArgoCD Application
     inputs:
@@ -82,7 +81,6 @@ jobs:
       inlineScript: |
         set -euo pipefail
         
-        # Using 'EOF' with quotes to prevent shell variable/escape expansion
         cat <<'EOF' > argocd-app.yaml
         apiVersion: argoproj.io/v1alpha1
         kind: Application
