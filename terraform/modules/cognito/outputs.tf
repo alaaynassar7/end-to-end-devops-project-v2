@@ -14,3 +14,7 @@ output "client_secret" {
 output "cognito_issuer_url" {
   value = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.main.id}"
 }
+output "cognito_domain" {
+  description = "The domain prefix for the Cognito User Pool"
+  value       = aws_cognito_user_pool_domain.main.domain
+}
