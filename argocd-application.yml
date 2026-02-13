@@ -1,4 +1,4 @@
-name: $(Date:yyyyMMdd)$(Rev:.r)-ArgoCD
+name: $(Date:yyyyMMdd)$(Rev:.r)-DirectDeploy
 trigger: none
 pr: none
 
@@ -7,7 +7,6 @@ variables:
   AWS_REGION: 'us-east-1'
   CLUSTER_NAME: 'alaa-devops-project-cluster' 
   IMAGE_REPOSITORY: 'alaaynassar7/motivational-app'
-  GIT_REPO_URL: 'https://github.com/alaaynassar7/end-to-end-devops-project-v2.git'
   HELM_CHART_PATH: 'motivational-app-chart' 
   NAMESPACE: 'alaa'
 
@@ -17,14 +16,14 @@ pool:
     - Agent.Name -equals alaaynassar-VMware
 
 jobs:
-- job: ArgoSync
-  displayName: 'ArgoCD Sync / Rollout'
+- job: DirectDeploy
+  displayName: 'Direct Helm Deployment'
   steps:
   - checkout: self
 
-  # 1. Update Kubeconfig and retrieve API Gateway Endpoint
+  # 1. Configure Kubeconfig and Fetch API Gateway URL
   - task: AWSShellScript@1
-    displayName: Configure kubeconfig
+    displayName: Configure kubeconfig & Get APIGW
     inputs:
       awsCredentials: $(AWS_SERVICE_CONNECTION)
       regionName: $(AWS_REGION)
@@ -40,14 +39,14 @@ jobs:
         fi
         echo "##vso[task.setvariable variable=APIGW_URL]$APIGW_URL"
 
-  # 2. Authenticate with Docker Hub
+  # 2. Docker Login to generate credentials for Secret
   - task: Docker@2
     displayName: Docker Login
     inputs:
       command: login
       containerRegistry: 'alaa-docker'
 
-  # 3. Create Image Pull Secret in Target Namespace
+  # 3. Create/Update Image Pull Secret
   - task: AWSShellScript@1
     displayName: Create Image Pull Secret
     inputs:
@@ -71,9 +70,9 @@ jobs:
           --docker-password="$DOCKER_PASS" \
           --docker-email=alaayoussefnassar@gmail.com
 
-  # 4. Generate and Apply ArgoCD Application Manifest
+  # 4. Direct Helm Upgrade/Install
   - task: AWSShellScript@1
-    displayName: Apply ArgoCD Application
+    displayName: Helm Deploy
     inputs:
       awsCredentials: $(AWS_SERVICE_CONNECTION)
       regionName: $(AWS_REGION)
@@ -81,33 +80,11 @@ jobs:
       inlineScript: |
         set -euo pipefail
         
-        cat <<'EOF' > argocd-app.yaml
-        apiVersion: argoproj.io/v1alpha1
-        kind: Application
-        metadata:
-          name: motivational-app
-          namespace: argocd 
-        spec:
-          project: default
-          source:
-            repoURL: '$(GIT_REPO_URL)'
-            targetRevision: HEAD
-            path: $(HELM_CHART_PATH)
-            helm:
-              parameters:
-                - name: "image.repository"
-                  value: "$(IMAGE_REPOSITORY)"
-                - name: "image.tag"
-                  value: "latest"
-                - name: "ingress.annotations.nginx\.ingress\.kubernetes\.io/auth-signin"
-                  value: "$(APIGW_URL)/oauth2/start?rd=$escaped_request_uri"
-          destination:
-            server: https://kubernetes.default.svc
-            namespace: $(NAMESPACE)
-          syncPolicy:
-            automated:
-              prune: true
-              selfHeal: true
-        EOF
+        echo "🚀 Starting Helm Upgrade for motivational-app..."
         
-        kubectl apply -f argocd-app.yaml
+        helm upgrade --install motivational-app ./$(HELM_CHART_PATH) \
+          --namespace $(NAMESPACE) \
+          --create-namespace \
+          --set image.repository=$(IMAGE_REPOSITORY) \
+          --set image.tag=latest \
+          --set "ingress.annotations.nginx\.ingress\.kubernetes\.io/auth-signin=$(APIGW_URL)/oauth2/start?rd=\$escaped_request_uri"
