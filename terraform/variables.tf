@@ -1,4 +1,3 @@
-# --- General Variables ---
 variable "aws_region" {
   description = "AWS Region"
   type        = string
@@ -17,28 +16,30 @@ variable "environment" {
   default     = "nonprod"
 }
 
-# --- Network Variables ---
 variable "vpc_cidr" {
   description = "The CIDR block for the VPC"
   type        = string
+  default     = "10.0.0.0/16"
 }
 
 variable "public_cidrs" {
   description = "Public Subnet CIDRs"
   type        = list(string)
+  default     = ["10.0.1.0/24", "10.0.2.0/24"]
 }
 
 variable "private_cidrs" {
   description = "Private Subnet CIDRs"
   type        = list(string)
+  default     = ["10.0.3.0/24", "10.0.4.0/24"]
 }
 
 variable "azs" {
   description = "Availability Zones"
   type        = list(string)
+  default     = ["us-east-1a", "us-east-1b"]
 }
 
-# --- EKS Variables ---
 variable "cluster_version" {
   description = "Kubernetes version for the EKS Cluster"
   type        = string
@@ -54,9 +55,9 @@ variable "instance_type" {
 variable "principal_arn" {
   description = "IAM User/Role ARN for EKS Admin access"
   type        = string
+  default     = "arn:aws:iam::913524922392:root"
 }
 
-# --- API Gateway & NLB (Passed Dynamically) ---
 variable "nlb_listener_arn" {
   description = "ARN of the NLB Listener (passed dynamically)"
   type        = string
@@ -69,14 +70,18 @@ variable "nlb_dns_name" {
   default     = ""
 }
 
-# --- Metadata ---
 variable "tags" {
   description = "Common Tags"
   type        = map(string)
-  default     = {}
+  default     = {
+    Owner       = "Alaa-Nassar"
+    Project     = "Graduation-Project-NTI"
+    Environment = "nonprod"
+  }
 }
 
 variable "irsa_roles" {
   description = "IRSA Roles Map"
+  type        = any
   default     = {}
 }
