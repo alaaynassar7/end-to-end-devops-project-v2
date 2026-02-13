@@ -57,6 +57,7 @@ jobs:
       inlineScript: |
         set -euo pipefail
         
+        # Extract credentials using jq for safer parsing
         DOCKER_AUTH=$(cat ~/.docker/config.json | jq -r '.auths["https://index.docker.io/v1/"].auth' | base64 -d)
         DOCKER_USER=$(echo $DOCKER_AUTH | cut -d: -f1)
         DOCKER_PASS=$(echo $DOCKER_AUTH | cut -d: -f2-)
@@ -71,7 +72,7 @@ jobs:
           --docker-password="$DOCKER_PASS" \
           --docker-email=alaayoussefnassar@gmail.com
 
-  # 4. Generate and Apply ArgoCD Application Manifest
+  # 4. Generate and Apply ArgoCD Application Manifest (Fixed Escape Characters)
   - task: AWSShellScript@1
     displayName: Apply ArgoCD Application
     inputs:
@@ -81,7 +82,8 @@ jobs:
       inlineScript: |
         set -euo pipefail
         
-        cat <<EOF > argocd-app.yaml
+        # Using 'EOF' with quotes to prevent shell variable/escape expansion
+        cat <<'EOF' > argocd-app.yaml
         apiVersion: argoproj.io/v1alpha1
         kind: Application
         metadata:
@@ -100,7 +102,7 @@ jobs:
                 - name: "image.tag"
                   value: "latest"
                 - name: "ingress.annotations.nginx\.ingress\.kubernetes\.io/auth-signin"
-                  value: "$(APIGW_URL)/oauth2/start?rd=\$escaped_request_uri"
+                  value: "$(APIGW_URL)/oauth2/start?rd=$escaped_request_uri"
           destination:
             server: https://kubernetes.default.svc
             namespace: $(NAMESPACE)
